@@ -1,0 +1,475 @@
+---
+title: "Reproducible Data Analysis Project"
+author: "u3232147"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The National Basketball League (NBA) is the premier men's professional basketball league in North America. The league comprises 30 teams. The game is played by two teams, five players each, with the aim to shoot a ball through the opponent's hoop, while preventing the other team from shooting the ball through the team's own hoop. 
+The five players each have a different position:
+
+**1. Point Guard** - usually a shorter player, and a good ball handler and passer.
+
+**2. Shooting Guard** - a player who creates openings and generally shoots from the three-point range.
+
+**3. Small Forward** - aggressive players who drive to the basket and who may try to draw fouls. 
+
+**4. Power Forward** - the team's most dependent scorer and most commonly scores from close to the basket.
+
+**5. Centre** - usually the tallest player on the team, who plays close to the basket and is skilled at rebounds and contesting shots.
+
+The Chicago Bulls is one of the 30 NBA teams. In the 2018-19 season, the team was ranked 27th based on their win-loss record. Player contracts for the 2019-20 season are currently being reviewed in order to improve the performance. It is believed that by changing the team's five starting players, the team's performance can improve. 
+
+The purpose of this report is to provide the General Manager of the Chicago Bulls NBA team the best five starting players the team can afford within the $118,000,000 budget for the 2019-20 season. 
+
+## Reading and Cleaning the Raw Data
+
+### Load the required packages
+
+```{r packages, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(broom)
+library(plyr)
+library(plotly)
+```
+
+### Data Source
+The data used for this analysis contains player, statistics, team statistics and player salaries for the 2018-19 season. The data also contains the team payroll for the 2019-20 season. It has been sourced from:
+
+- Player and team statistics: [sourced from basketball-reference.com] (basketball-reference.com)
+
+- Player salaries and team payroll: [sourced from hoopshype.com/salaries] (hoopshype.com/salaries)
+
+### Read Data
+Read in the source files using the `read_csv()` function from the `readr` package. 
+
+```{r read_data, message=FALSE, warning=FALSE} 
+# read in the data
+nba_player_salary <- read_csv("data/raw/2018-19_nba_player-salaries.csv")
+nba_player_stats <- read_csv("data/raw/2018-19_nba_player-statistics.csv")
+nba_team_stats1 <- read_csv("data/raw/2018-19_nba_team-statistics_1.csv")
+nba_team_stats2 <- read_csv("data/raw/2018-19_nba_team-statistics_2.csv")
+nba_team_payroll <- read_csv("data/raw/2019-20_nba_team-payroll.csv")
+```
+
+### Check and Clean the data
+
+Check the structure of the data using str() and view the data in the console
+
+```{r structure}
+str(nba_player_salary)
+str(nba_player_stats)
+str(nba_team_stats1)
+str(nba_team_stats2)
+str(nba_team_payroll)
+```
+
+Change the format of the payroll salary figures to be numeric as they are currently character, and rename the variables in the team and player statistics to remove any numbers at the beginning of the variable names and % signs
+```{r format}
+nba_team_payroll$salary <- as.numeric(gsub("[\\$,]", "", nba_team_payroll$salary)) #Sourced from #https://rforexcelusers.com/remove-currency-dollar-sign-r/
+nba_player_stats <- dplyr::rename(nba_player_stats, FGp = "FG%", x3P = "3P", x3PA = "3PA", x3Pp = "3P%", x2P = "2P", x2PA = "2PA", x2Pp = "2P%", eFGp = "eFG%", FTp = "FT%")
+nba_team_stats1 <- dplyr::rename(nba_team_stats1, 
+                          x3PAr = '3PAr', TSp = 'TS%', eFGp = 'eFG%', TOVp = 'TOV%', ORBp = 'ORB%', DRBp = 'DRB%')
+nba_team_stats2 <- dplyr::rename(nba_team_stats2,
+                          FGp = 'FG%', x3P = '3P', x3PA = '3PA', x3Pp = '3P%', x2P = '2P', x2PA = '2PA', x2Pp = '2P%', FTp = 'FT%')
+```
+
+Join the two team statistics data files and add salary to the player statistics file
+
+```{r join}
+nba_team_stats2 <- nba_team_stats2 %>%
+  full_join(x = nba_team_stats2, y = nba_team_stats1,by = "Team") %>%
+  select(-Rk.y)
+
+nba_team_stats2 <- dplyr::rename(nba_team_stats2, Rank = 'Rk.x')
+
+nba_player_stats <- nba_player_salary %>%
+  select(player_id, player_name, salary) %>%
+  right_join(nba_player_stats, by = "player_name")
+```
+
+Combine player values in the Player Statistics file and remove duplicates
+
+```{r duplicates}
+nba_player_stats_draft <- transform(nba_player_stats, Age = as.character(Age), player_id = as.character(player_id), salary = as.character(salary))
+nba_player_stats_draft <- plyr::ddply(nba_player_stats_draft, "player_name", numcolwise(sum)) #Sourced from https://stackoverflow.com/questions/10180132/consolidate-duplicate-rows
+nba_player_stats <- select(nba_player_stats, player_id, player_name, salary, Pos, Age, Tm)
+nba_player_stats <- nba_player_stats[!duplicated(nba_player_stats$player_name),]
+nba_player_stats <- right_join(x = nba_player_stats_draft, y = nba_player_stats, 
+                               by = "player_name")
+nba_player_stats <- nba_player_stats[, c(27, 1, 28, 29, 30, 31, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)]
+nba_player_stats <- arrange(nba_player_stats, player_id)
+nba_player_stats <- transform(nba_player_stats, Age = as.numeric(Age), player_id = as.numeric(player_id), salary = as.numeric(salary))
+```
+
+Treat missing values by making any NA percentages (due to dividing by 0) as 0. Players with missing salary data can be removed later once summary statistics are derived.
+
+```{r missing values}
+sum(is.na(nba_player_stats))
+sum(is.na(nba_team_stats1))
+sum(is.na(nba_team_stats2))
+which(is.na(nba_player_stats), arr.ind = TRUE)  
+naniar::vis_miss(nba_player_stats)
+naniar::vis_miss(nba_team_stats1)
+nba_player_stats <- replace_na(nba_player_stats, list(FGp = 0, x3Pp = 0, x2Pp = 0, eFGp = 0, FTp = 0))
+nba_team_stats2 <- select(nba_team_stats2, -X23, -X24, -X25)
+nba_team_stats1 <- select(nba_team_stats1, -X23, -X24, -X25)
+sum(is.na(nba_player_stats)) #18 players have no salary data and will be treated post exploratory analysis
+sum(is.na(nba_team_stats1))
+sum(is.na(nba_team_stats2))
+```
+
+## Exploratory Analysis
+
+View summary statistics and bar charts of the variables in the Team Statistics and Team Player objects to ascertain the minimums, maximums, quartile ranges, mean, standard deviation and variability. The salary histogram seems quite skewed indicating there could be data quality issues.
+
+```{r summary}
+summary(nba_team_stats2)
+summary(nba_player_stats)
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = PTS)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = x3Pp)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = x2Pp)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = FGp)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = eFGp)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = FTp)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = AST)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = BLK)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = STL)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = ORB)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = DRB)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = TOV)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+nba_team_stats2 %>%
+  ggplot(aes(x = Team, y = PF)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90))
+
+ggplot(data = nba_player_stats) +
+  geom_histogram(aes(x = salary))
+```
+
+View mean and standard deviations for players and teams of percentage of 3-point, 2-point, Free Throw and Field Goal variables
+
+```{r summary mean sd}
+nba_team_stats2 %>%
+  dplyr::summarise(mnFGp = mean(FGp),
+          mnx3Pp = mean(x3Pp),
+          mnx2Pp = mean(x2Pp),
+          mneFGp = mean(eFGp),
+          mnFTp = mean(FTp),
+          sdFGp = sd(FGp),
+          sdx3Pp = sd(x3Pp),
+          sdx2Pp = sd(x2Pp),
+          sdeFGp = sd(eFGp),
+          sdFTp = sd(FTp))
+
+nba_player_stats %>%
+  dplyr::group_by(Pos) %>%
+  dplyr::summarise(mnFGp = mean(FGp),
+         mnx3Pp = mean(x3Pp),
+         mnx2Pp = mean(x2Pp),
+         mneFGp = mean(eFGp),
+         mnFTp = mean(FTp),
+         sdFGp = sd(FGp),
+         sdx3Pp = sd(x3Pp),
+         sdx2Pp = sd(x2Pp),
+         sdeFGp = sd(eFGp),
+         sdFTp = sd(FTp))
+```
+
+Create separate object for players filtered by position, and compare the mean scoring percentages for that position with the player's scoring percentage
+```{r filter}
+#Filter by position
+center <- nba_player_stats %>%
+  filter(Pos == "C") %>%
+  mutate(comparison_FGp = if_else(FGp > mean(FGp), "better", "worse"), comparison_x3Pp = if_else(x3Pp > mean(x3Pp), "better", "worse"), comparison_x2Pp = if_else(x2Pp > mean(x2Pp), "better", "worse"), comparison_eFGp = if_else(eFGp > mean(eFGp), "better", "worse"), comparison_FTp = if_else(FTp > mean(FTp), "better", "worse")) 
+point_guard <- nba_player_stats %>%
+  filter(Pos == "PG") %>%
+  mutate(comparison_FGp = if_else(FGp > mean(FGp), "better", "worse"), comparison_x3Pp = if_else(x3Pp > mean(x3Pp), "better", "worse"), comparison_x2Pp = if_else(x2Pp > mean(x2Pp), "better", "worse"), comparison_eFGp = if_else(eFGp > mean(eFGp), "better", "worse"), comparison_FTp = if_else(FTp > mean(FTp), "better", "worse"))
+shooting_guard <- nba_player_stats %>%
+  filter(Pos == "SG") %>%
+  mutate(comparison_FGp = if_else(FGp > mean(FGp), "better", "worse"), comparison_x3Pp = if_else(x3Pp > mean(x3Pp), "better", "worse"), comparison_x2Pp = if_else(x2Pp > mean(x2Pp), "better", "worse"), comparison_eFGp = if_else(eFGp > mean(eFGp), "better", "worse"), comparison_FTp = if_else(FTp > mean(FTp), "better", "worse"))
+small_forward <- nba_player_stats %>%
+  filter(Pos == "SF") %>%
+  mutate(comparison_FGp = if_else(FGp > mean(FGp), "better", "worse"), comparison_x3Pp = if_else(x3Pp > mean(x3Pp), "better", "worse"), comparison_x2Pp = if_else(x2Pp > mean(x2Pp), "better", "worse"), comparison_eFGp = if_else(eFGp > mean(eFGp), "better", "worse"), comparison_FTp = if_else(FTp > mean(FTp), "better", "worse"))
+power_forward <- nba_player_stats %>%
+  filter(Pos == "PF") %>%
+  mutate(comparison_FGp = if_else(FGp > mean(FGp), "better", "worse"), comparison_x3Pp = if_else(x3Pp > mean(x3Pp), "better", "worse"), comparison_x2Pp = if_else(x2Pp > mean(x2Pp), "better", "worse"), comparison_eFGp = if_else(eFGp > mean(eFGp), "better", "worse"), comparison_FTp = if_else(FTp > mean(FTp), "better", "worse"))
+```
+
+Create per game data for each teams and visualise
+
+```{r per game data, warning=FALSE, message=FALSE}
+nba_team_stats2 <- nba_team_stats2 %>%
+  mutate(FG_per_game = FG / G,
+         x3P_per_game = x3P / G,
+         x2P_per_game = x2P / G,
+         FT_per_game = FT / G,
+         PTS_per_game = PTS / G,
+         AST_per_game = AST / G,
+         STL_per_game = STL / G,
+         BLK_per_game = BLK / G,
+         ORB_per_game = ORB / G,
+         DRB_per_game = DRB / G,
+         TOV_per_game = TOV / G,
+         PF_per_game = PF / G,)
+
+ggplot(nba_team_stats2, aes(x = x3P_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = x2P_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = FT_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = AST_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = STL_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = BLK_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = ORB_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = DRB_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = TOV_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+ggplot(nba_team_stats2, aes(x = PF_per_game, y = PTS_per_game)) +
+  geom_point(alpha = 0.5, colour = "purple") +
+  geom_smooth(method = "lm")
+
+```
+
+Based on the exploratory analysis, there is very little difference between each of the teams in the point metrics, and scoring points obviously has a strong relationship with increasing points per game.
+
+The modelling conducted further below will hence focus on the other data such as assists, blocks, steals, offensive and defensive rebounds, turnovers and fouls to see these variables' impact on total points per game, to ascertain which variables have the most impact, and which players could most contribute in these areas to increase total points, which will potentially result in more games won.
+
+### Modelling
+
+Create linear regression model using assists, blocks, steals, offensive and defensive rebounds, turnovers and fouls variables.
+
+The variables with the strongest positive impact on points per game are defensive rebounds (for every one defensive rebound, a team will be expected to score 1.43 more points); assists (for every assist, a team will be expected to score 0.84 more points); and personal fouls (for every personal foul, a team can be expected to score 1.67 more points). Turnovers has a strong negative impact on total points with a team expected to score 1.84 points less for each turnover. The confidence intervals for these variables are also both positive. The other variables are harder to interpret whether there is a positive or negative relationship given the confidence intervals go from negative to positive.
+
+We thus want to find the players that have higher numbers of defensive rebounds, personal fouls, and assists, with a lower number of turnovers.
+
+```{r model, message=FALSE, warning=FALSE}
+fit <- lm(PTS_per_game ~ ORB_per_game + DRB_per_game + AST_per_game + STL_per_game + BLK_per_game + TOV_per_game + PF_per_game, data = nba_team_stats2)
+tidy(fit, conf.int = TRUE)
+
+nba_team_stats2 <- mutate(nba_team_stats2, exp_PTS_per_game = predict(fit, newdata = nba_team_stats2))
+
+ggplot(nba_team_stats2, aes(exp_PTS_per_game, PTS_per_game, label = Team)) +
+  geom_point(colour = "dodgerblue") +
+  geom_text(nudge_x = 0.1, cex = 3) +
+  geom_abline(linetype = "dashed", colour = "magenta")
+
+ggplot(nba_team_stats2, aes(x = W, y = exp_PTS_per_game, label = Team)) +
+  geom_point(colour = "dodgerblue") +
+  geom_text(nudge_x = 0.1, cex = 3)
+```
+
+Check assumptions are met for linear regression:  outliers, leverage points, influence, independence of observations, homoskedasticity, linearity and multicollinearity. The results generally meet all assumptions, independence of observations is slightly further away from two indicating we could look at this in more detail. 
+
+```{r assumptions, message=FALSE, warning=FALSE}
+std_res <- rstandard(fit)
+points <- 1:length(std_res)
+
+ggplot(data = NULL, aes(x = points, y = std_res)) +
+geom_point() +
+ylim(c(-4,4)) +
+geom_hline(yintercept = c(-3, 3), colour = "red", linetype = "dashed")
+
+hats <- hatvalues(fit)
+ggplot(data = NULL, aes(x = points, y = hats)) +
+geom_point()
+
+cook <- cooks.distance(fit)
+ggplot(data = NULL, aes(x = points, y = cook)) +
+geom_point()
+
+cook_labels <- if_else(cook >= 0.015, paste(points), "")
+ggplot(data = NULL, aes(x = points, y = cook)) +
+geom_point() +
+geom_text(aes(label = cook_labels), nudge_y = 0.001)
+
+car::durbinWatsonTest(fit)
+
+res <- residuals(fit)
+fitted <- predict(fit)
+
+ggplot(data = NULL, aes(x = fitted, y = res)) +
+geom_point(colour = "dodgerblue") +
+geom_hline(yintercept = 0, colour = "red", linetype = "dashed")
+
+ggplot(data = NULL, aes(sample = res)) +
+stat_qq() + stat_qq_line()
+
+car::avPlots(fit)
+sqrt(car::vif(fit))
+```
+We can now create player variables to determine the 5 starting players to select. To do this we can first create per game values and then apply the model to view the outcome.
+
+```{r team and player mins per game, message=FALSE, warning=FALSE}
+team_mins_per_game <- nba_team_stats2 %>%
+  dplyr::group_by(Team) %>%
+  dplyr::summarise(team_mins_per_game = MP/max(G)) %>%
+  pull(team_mins_per_game) %>%
+  mean
+team_mins_per_game
+
+nba_player_stats <- nba_player_stats %>%
+  mutate(G1 = MP / team_mins_per_game,
+         FG_per_game = FG / G1,
+                   x3P_per_game = x3P / G1,
+                   x2P_per_game = x2P / G1,
+                   FT_per_game = FT / G1,
+                   PTS_per_game = PTS / G1,
+                   AST_per_game = AST / G1,
+                   STL_per_game = STL / G1,
+                   BLK_per_game = BLK / G1,
+                   ORB_per_game = ORB / G1,
+                   DRB_per_game = DRB / G1,
+                   TOV_per_game = TOV / G1,
+                   PF_per_game = PF / G,1) %>%
+  select(-G1)
+nba_player_stats <- mutate(nba_player_stats, exp_PTS = predict(fit, newdata = nba_player_stats))
+
+nba_player_stats %>%
+  ggplot(aes(x = exp_PTS)) +
+  geom_histogram(binwidth = 5, colour = "black", fill = "dodgerblue")
+
+nba_player_stats <- drop_na(nba_player_stats) #removing NA values
+
+gg <- nba_player_stats %>%
+  ggplot(aes(x = salary/1000000, y = exp_PTS, color = Pos)) +
+  geom_point() + 
+  xlab("Salary (Millions)") + 
+  ylab("Expected Points Scored")
+gg <- gg +
+  labs(title = "Points distribution based on salary by position", subtitle = "Players with higher salary tend to score more points", colour = "Position")
+gg
+```
+As mentioned earlier there may be some data quality issues with the salary which may need to be investigated. Adjusting the scale of the plot to exclude salaries less than $100,000 which are likely to be anomolies, we can more clearly see undervalued players.
+
+```{r output, message=FALSE, warning=FALSE}
+gg <- nba_player_stats %>%
+  ggplot(aes(x = salary/1000000, y = exp_PTS, color = Pos)) +
+  geom_point() + 
+  xlab("Salary (Millions)") + 
+  ylab("Expected Points Scored") +
+  ylim(90, 260) +
+  xlim(0.1, 20)
+gg <- gg +
+  labs(title = "Points distribution based on salary by position", subtitle = "Players with higher salary tend to score more points", colour = "Position") +
+  geom_text(aes(label = player_id), nudge_y = 5)
+gg
+ggplotly <- gg
+ggplotly
+```
+
+### Player Recommendations
+
+Thank you for the opportunity to perform analysis to provide our recommendations on the five starting players for the Chicago Bulls NBA team for the 2019-20 season. 
+
+In conducting our analysis, we have assumed that scoring more points is key to winning games. With this assumption in mind, we looked at data both at a team level, and at a player level to see where relationships are between variables and total points scored. Aside from field goals and free throws which have a direct impact on points, we wanted to focus on other key metrics which input to total points. Based on our model, we believe that players who have a high number of assists, defensive rebounds and personal fouls, with a low number of turnovers is key to scoring more points. 
+
+Based on this analysis, we recommend the following five starting players who are high scoring and are mid-range in salary and within the 2019-20 season budget of $118,000,000 (with sufficient budget remaining for signing other players to make up the complete team.) We utilised the graph below in making the following recommendations:
+
+1. Shooting Guard 
+Luka Doncic
+$6,569,040
+
+2. Point Guard
+Ben Simmons
+$6,424,520
+
+3. Small Forward
+Thabo Sefolosha
+$5,250,000
+
+4. Power Forward
+Cheick Diallo
+$1,544,951
+
+5. Centre
+Pau Gasol
+$17,133,285
+
+```{r summary graph, message=FALSE, warning=FALSE}
+ggplotly
+```
+
+### Summary
+The assignment from the General Manager for the Chicago Bulls was to recommend 5 starting players who would fit into the 2019-20 budget of $118,000,000. Based on the analysis completed, we have recommended 5 players who are experts in creating opportunities for scoring through assists, rebounds, and fouls. Intentionally, we did not include field goals in the analysis as this seemed fairly consistent across all teams and the Chicago Bulls did not seem to be performing worse in this area.  
+
+There are limitations of the recommendation as we did not look at key variables for each position and have assumed that for all positions, assists, rebounds and fouls are the key metrics. A better approach may have been to conduct separate models for each position, based on the key variables for that position.
+
+### Reference List
+
+1. Wikipedia, the free encyclopedia [wiki on the internet]. St Petersburg (FL): Wikimedia Foundation. 2001 - . Basketball positions; 2021 May 7 [cited 2021 May 9]; [about 5 screens]. Available from: https://en.wikipedia.org/wiki/Basketball_positions
+
+2. Wikipedia, the free encyclopedia [wiki on the internet]. St Petersburg (FL): Wikimedia Foundation. 2001 - . Basketball; 2021 May 7 [cited 2021 May 9]; [about 5 screens]. Available from: https://en.wikipedia.org/wiki/Basketball
+
+3. John. R for Excel users [Internet]. How to remove dollar sign in R (and other currency symbols); 2016 Jun 21 [cited 2021 May 9]; [about 6 screens]. Available from: https://rforexcelusers.com/remove-currency-dollar-sign-r/
+
+4. Ben Bolker. Stack Overflow [Internet]. Consolidate duplicate rows; 2012 Apr 16 [cited 2021 May 9]; [about 6 screens]. Available from: https://stackoverflow.com/questions/10180132/consolidate-duplicate-rows 
