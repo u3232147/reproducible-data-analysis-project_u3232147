@@ -4,7 +4,7 @@ This repository contains analysis of NBA player data in the 2018-19 season. The 
 1. Raw Data - five files of raw NBA player and team statistics. Variable descriptions provided below
 2. Processed Data - two files of team data and player data following data tidying and exploration activities
 3. Figs - figures used as part of data exploration
-4. Docs - R Markdown final output
+4. Docs - R Markdown final output as well as raw markdown file
 5. Rproject file - R script containing code for data analysis
 
 Variable descriptions for each of the five source files:
